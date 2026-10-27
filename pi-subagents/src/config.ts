@@ -17,8 +17,10 @@ export interface DelegateRoleConfig {
    *  per-call `model` > this role default > parent agent's current model. A
    *  value that isn't a valid `"provider/id"` is ignored (treated as unset).
    *  If the configured model doesn't exist in the live registry, the child
-   *  falls back to the parent model and a warning is logged — it never fails. */
-  model?: string;
+   *  falls back to the parent model and a warning is logged — it never fails.
+   *  A list is a roster: each dispatch picks one at random among the entries
+   *  found in the live registry. */
+  model?: string | string[];
   /** Default thinking level for this role: one of off|minimal|low|medium|
    *  high|xhigh|max. Resolution priority: per-call `thinkingLevel` > this role
    *  default > global `delegate.thinkingLevel` > Pi's own default. An invalid

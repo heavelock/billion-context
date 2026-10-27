@@ -364,10 +364,32 @@ function pickFirstDefined(values: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
-function normalizeModelRef(m: string | undefined): string | undefined {
-  if (!m) return undefined;
+function normalizeModelRef(m: unknown): string | undefined {
+  if (typeof m !== "string") return undefined; // config JSON is untyped
   const s = m.trim();
   return s.includes("/") ? s : undefined;
+}
+
+/** Pick a random model from a role's `model` (one ref or a roster). Prefers refs
+ *  the registry knows; if none are known, picks among all valid refs so the
+ *  caller's missing-model warning + parent fallback still fire. */
+export function pickRoleModel(
+  model: string | string[] | undefined,
+  exists: ((provider: string, id: string) => boolean) | undefined,
+  random: () => number = Math.random,
+): string | undefined {
+  const valid = (Array.isArray(model) ? model : [model])
+    .map(m => normalizeModelRef(m))
+    .filter((m): m is string => !!m);
+  const known = exists
+    ? valid.filter(m => {
+        const [p, ...rest] = m.split("/");
+        return exists(p!, rest.join("/"));
+      })
+    : [];
+  const pool = known.length > 0 ? known : valid;
+  if (pool.length === 0) return undefined;
+  return pool[Math.floor(random() * pool.length)];
 }
 
 let delegateNotifyIfRead: "skip" | "always" = "skip";
@@ -628,7 +650,7 @@ const DelegateParams = Type.Object({
     Type.String({ description: "Working directory for the delegate (default: current project dir)." }),
   ),
   model: Type.Optional(
-    Type.String({ description: 'Model override as "provider/id". Default: this role\'s configured model (delegate.agents.<role>.model), else inherit the current model.' }),
+    Type.String({ description: 'Model override as "provider/id". Default: this role\'s configured model (delegate.agents.<role>.model; random pick when it is a list), else inherit the current model.' }),
   ),
   thinkingLevel: Type.Optional(
     Type.String({ description: `Per-call thinking-level override: ${VALID_THINKING_LEVELS.join("|")}. Default: this role's configured level, else the global delegate.thinkingLevel, else Pi's own default.` }),
@@ -1888,14 +1910,16 @@ export async function buildChildArgs(
     cliArgs.push("--tools", merged.join(","));
   }
 
-  // Model: per-call > role default (delegate.agents.<role>.model) > inherit parent.
+  // Model: per-call > role default (delegate.agents.<role>.model; a list is a
+  // roster, one picked at random) > inherit parent.
   // A role-configured model is validated against the live registry; a missing one
   // falls back to the parent model with a warning and never fails (omo lesson).
   // Per-call and inherited models pass through untouched — a per-call override is a
   // deliberate choice that may name a custom/non-catalog model pi resolves itself.
   const roleCfg = delegateDefaults.agents?.[args.agent];
   const callModel = normalizeModelRef(args.model);
-  const roleModel = normalizeModelRef(roleCfg?.model);
+  const registryRef = ctx.modelRegistry;
+  const roleModel = pickRoleModel(roleCfg?.model, registryRef ? (p, id) => !!registryRef.find(p, id) : undefined);
   const parentProvider = ctx.model?.provider;
   const parentModelId = ctx.model?.id;
 

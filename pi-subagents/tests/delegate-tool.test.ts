@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildChildArgs, delegateSpawnOptions, injectedWaitMessage, buildWaitResult, buildCancelResult, getDelegateUsage, resetDelegateUsage, injectResult, effectiveExitCode, formatRunResult, resolveWaitTimeoutMs, findUndeliveredRuns, undeliveredNoticeFrom, buildRecoveryNotice, makeDelegateTool, exitLabel, cancelledFileNote, delegateStdinText, readActivityTail, scheduleRunNotification, flushDelegateNotifications, formatBatchRunSection, setDelegatePolicy, delegateChildEnv, asyncWatchdogDescription, ConcurrencyGate, setDelegateDefaults, resetDelegateDefaults, isValidThinkingLevel, resolvePerCallTimeoutMs, addDelegateUsage, emitInlineUsageNote, makeDelegateWaitTool, makeDelegateCancelTool, runningRunsSnapshot } from "../src/delegate-tool.js";
+import { buildChildArgs, delegateSpawnOptions, injectedWaitMessage, buildWaitResult, buildCancelResult, getDelegateUsage, resetDelegateUsage, injectResult, effectiveExitCode, formatRunResult, resolveWaitTimeoutMs, findUndeliveredRuns, undeliveredNoticeFrom, buildRecoveryNotice, makeDelegateTool, exitLabel, cancelledFileNote, delegateStdinText, readActivityTail, scheduleRunNotification, flushDelegateNotifications, formatBatchRunSection, setDelegatePolicy, delegateChildEnv, asyncWatchdogDescription, ConcurrencyGate, setDelegateDefaults, resetDelegateDefaults, isValidThinkingLevel, resolvePerCallTimeoutMs, addDelegateUsage, emitInlineUsageNote, makeDelegateWaitTool, makeDelegateCancelTool, runningRunsSnapshot, pickRoleModel } from "../src/delegate-tool.js";
 import { DEFAULT_DELEGATE_POLICY } from "../src/config.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -243,6 +243,41 @@ test("buildChildArgs model: slash in model id splits on first slash only", async
   );
   assert.equal(flagVal(cliArgs, "--provider"), "prov");
   assert.equal(flagVal(cliArgs, "--model"), "a/b");
+});
+
+test("pickRoleModel: random pick prefers registry-known valid refs", () => {
+  const exists = (p: string, id: string) => ["a/x", "b/y"].includes(`${p}/${id}`);
+  const roster = ["a/x", "ghost/z", "no-slash", "b/y"];
+  assert.equal(pickRoleModel(roster, exists, () => 0), "a/x");
+  assert.equal(pickRoleModel(roster, exists, () => 0.99), "b/y");
+  assert.equal(pickRoleModel("a/x", exists), "a/x");
+  assert.equal(pickRoleModel(["ghost/z"], exists), "ghost/z");
+  assert.equal(pickRoleModel(["no-slash"], exists), undefined);
+  assert.equal(pickRoleModel(undefined, exists), undefined);
+});
+
+test("buildChildArgs model: role roster picks randomly among known; per-call still wins", async () => {
+  resetDelegateDefaults();
+  setDelegateDefaults({ agents: { worker: { model: ["r1/m1", "r2/m2", "ghost/g"] } } });
+  const ctx = ctxWithRegistry({ provider: "parent", id: "parent-model" }, ["r1/m1", "r2/m2"]);
+  const seen = new Set<string>();
+  for (let i = 0; i < 40; i++) {
+    const { cliArgs } = await buildChildArgs({ agent: "worker", task: "t" }, "prompt", ctx, `del_r${i}`);
+    seen.add(`${flagVal(cliArgs, "--provider")}/${flagVal(cliArgs, "--model")}`);
+  }
+  assert.deepEqual([...seen].sort(), ["r1/m1", "r2/m2"]);
+  const { cliArgs } = await buildChildArgs({ agent: "worker", task: "t", model: "call/c" }, "prompt", ctx, "del_rc");
+  assert.equal(flagVal(cliArgs, "--model"), "c");
+});
+
+test("buildChildArgs model: roster with no known models falls back to parent", async () => {
+  resetDelegateDefaults();
+  setDelegateDefaults({ agents: { reviewer: { model: ["ghost/x", "ghost/y"] } } });
+  const { cliArgs } = await buildChildArgs(
+    { agent: "reviewer", task: "t" },
+    "prompt", ctxWithRegistry({ provider: "parent", id: "parent-model" }), "del_rf",
+  );
+  assert.equal(flagVal(cliArgs, "--model"), "parent-model");
 });
 
 test("buildChildArgs thinking: per-call wins over role and global", async () => {
