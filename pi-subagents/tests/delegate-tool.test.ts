@@ -745,6 +745,7 @@ test("async delegate with missing cwd injects FAILED instead of crashing the hos
   assert.match(sent[0]!, /FAILED/);
   assert.ok(sent[0]!.includes(runId!), "injection names the failed runId");
   assert.match(sent[0]!, /spawn error/);
+  assert.ok(sent[0]!.includes("cwd does not exist: /nonexistent-e2e-cwd"), "names the missing cwd, not the node binary");
   // #235: spawn errors no longer delete the reply file — the error is written
   // into it so the run points at a file like any other.
   const outFile = join(tmpdir(), "acp-delegate", `${runId}.out`);

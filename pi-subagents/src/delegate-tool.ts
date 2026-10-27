@@ -1439,6 +1439,11 @@ function spawnDelegateChild(opts: {
     [resolvePiCliEntry(process.argv[1] ?? "", process.env, opts.isPi), ...opts.cliArgs],
     delegateSpawnOptions(opts.cwd, opts.env),
   ) as ChildProcess;
+  // Registered first so every later error handler sees it: Node reports a
+  // missing cwd as "spawn <node path> ENOENT", wrongly blaming the binary.
+  child.once("error", (e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT" && !existsSync(opts.cwd)) e.message = `cwd does not exist: ${opts.cwd}`;
+  });
   child.stdin?.once("error", (e: Error) => {
     debug.event("delegate-stdin-error", { runId: "pre-spawn", error: String(e) });
     logError("delegate", { event: "stdin-error", runId: opts.runId, error: String(e) });
